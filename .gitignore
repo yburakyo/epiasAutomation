@@ -1,0 +1,22 @@
+# Build directories
+bin/
+obj/
+
+# User-specific files
+.vs/
+*.user
+*.suo
+
+# Backup and temporary files
+*.tmp
+*.bak
+*.log
+*.lock
+*.dmp
+
+# IDE-specific files
+.idea/
+*.iml
+
+# Dependency cache
+packages/
