@@ -1,6 +1,11 @@
 ﻿using OpenQA.Selenium;
 using OpenQA.Selenium.Chrome;
 using OpenQA.Selenium.Support.UI;
+using OpenQA.Selenium.DevTools.V132.Browser;
+using MailKit.Net.Smtp;
+using MimeKit;
+using Microsoft.Extensions.Configuration;
+using System.Security.Authentication;
 
 
 namespace epiasAutomation
@@ -8,17 +13,28 @@ namespace epiasAutomation
     public class UnitTest1
     {
         [Fact]
-        public void Test1()
+        public async Task Test1()
         {
             var options = new ChromeOptions();
-            options.DebuggerAddress = "127.0.0.1:9222";  // Local debug port
-            
-            // Attach to existing Chrome instance
-            using var driver = new ChromeDriver(options);
+            options.DebuggerAddress = "127.0.0.1:9222";  // local debug port
+
+            using var driver = new ChromeDriver(options); // attach to existing Chrome instance
             
             driver.SwitchTo().Window(driver.WindowHandles[0]);
 
+            // set download path with DevTools
+            string downloadPath = Path.Combine(Environment.CurrentDirectory, "Downloads");
+            Directory.CreateDirectory(downloadPath);
 
+            var devTools = driver.GetDevToolsSession();
+            
+            await devTools.SendCommand(new SetDownloadBehaviorCommandSettings()
+            {
+                Behavior = "allow",
+                DownloadPath = downloadPath
+            });
+
+            // click through the webstite to download the file
             WebDriverWait wait = new WebDriverWait(driver, TimeSpan.FromSeconds(5));
 
             var lockButton = wait.Until(d => d.FindElement(By.ClassName("lock-button")));
@@ -40,8 +56,8 @@ namespace epiasAutomation
 
             var dateInput = wait.Until(d => d.FindElement(By.Name("startDate")));
 
-            dateInput.SendKeys(Keys.Control + "a"); // Select all
-            dateInput.SendKeys(Keys.Delete); // Delete selection
+            dateInput.SendKeys(Keys.Control + "a");
+            dateInput.SendKeys(Keys.Delete);
 
             dateInput.SendKeys(yesterday);
             
@@ -54,9 +70,60 @@ namespace epiasAutomation
             var xlsxOption = wait.Until(d => d.FindElement(By.XPath("//div[@class='epuitable-export-panel-item']//span[normalize-space()='XLSX Formatında']")));
             xlsxOption.Click();
 
-            System.Threading.Thread.Sleep(5000); // sleep to see the website, will remove later
+            // wait for file to download
+            var fileWaiter = new DefaultWait<string>(downloadPath)
+            {
+                Timeout = TimeSpan.FromSeconds(30),
+                PollingInterval = TimeSpan.FromSeconds(1)
+            };
+            string downloadedFile = fileWaiter.Until(dir => 
+                Directory.GetFiles(dir, "*.xlsx").FirstOrDefault()
+            );
 
-            driver.Close();  // Closes Selenium connection but leaves Chrome running
+
+            // read credentials
+            string? projectRoot = Directory.GetParent(AppDomain.CurrentDomain.BaseDirectory)?.Parent?.Parent?.Parent?.FullName; // go up 3 directories
+            string configPath = Path.Combine(projectRoot, "appsettings.json");
+
+            var config = new ConfigurationBuilder()
+                .AddJsonFile(configPath, optional: false)
+                .Build();
+
+            var message = new MimeMessage();
+            message.From.Add(new MailboxAddress("EPİAŞ Automation", config["EmailSettings:SenderEmail"]));
+            message.To.Add(new MailboxAddress("Recipient", config["EmailSettings:RecipientEmail"]));
+            message.Subject = $"PTF Report - {yesterday}";
+
+            var bodyBuilder = new BodyBuilder();
+            bodyBuilder.TextBody = "Attached is the requested PTF report.";
+            bodyBuilder.Attachments.Add(downloadedFile);
+
+            message.Body = bodyBuilder.ToMessageBody();
+
+            // send email
+            try
+            {
+            using var smtpClient = new SmtpClient();
+
+            await smtpClient.ConnectAsync(
+                config["EmailSettings:SmtpServer"], 
+                int.Parse(config["EmailSettings:SmtpPort"]), 
+                MailKit.Security.SecureSocketOptions.StartTlsWhenAvailable // fallback
+            );
+
+            await smtpClient.AuthenticateAsync(
+                config["EmailSettings:SenderEmail"],
+                config["EmailSettings:SenderPassword"] // app password
+            );
+
+            await smtpClient.SendAsync(message);
+            await smtpClient.DisconnectAsync(true);
+            }
+            catch (AuthenticationException ex)
+            {
+                Console.WriteLine($"Authentication failed: {ex.Message}");
+            }
+            driver.Close();
         }
     }
 }
