@@ -34,5 +34,6 @@ dotnet restore
 
 3. Run the automation:
 ```bash
+dotnet build
 dotnet test
 ```
