@@ -7,6 +7,7 @@ Automates PTF report download and mail automation from EPİAŞ using Selenium We
 - Google Chrome (latest stable version)
 - Valid EPİAŞ account credentials
 - Gmail account with App Password
+- ChromeDriver
 
 
 ## Installation
